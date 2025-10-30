@@ -1,6 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = "https://hxptnnqmmroizubvhozo.supabase.co";
-const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4cHRubnFtbXJvaXp1YnZob3pvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA4NDU0MjEsImV4cCI6MjA2NjQyMTQyMX0.GFVQAMHjZR3bNhiNtUm9aNmTj6awHwOFBT7f7MMbRyw";
+const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL || (typeof window !== "undefined" && window.__env && window.__env.REACT_APP_SUPABASE_URL);
+const SUPABASE_KEY = process.env.REACT_APP_SUPABASE_KEY || (typeof window !== "undefined" && window.__env && window.__env.REACT_APP_SUPABASE_KEY);
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.warn("Supabase config missing. Set REACT_APP_SUPABASE_URL and REACT_APP_SUPABASE_KEY in your environment.");
+}
+
+export const supabase = createClient(SUPABASE_URL || "", SUPABASE_KEY || "");
+export default supabase;
