@@ -4,69 +4,41 @@ import StokTakip from "./StokTakip";
 import AyarlarStokRBAC from "./AyarlarStokRBAC";
 import PersonelTakip from "./PersonelTakip";
 import OlcullerForm from "./OlcullerForm";
-import { supabase } from "./supabaseClient";
-import bcrypt from "bcryptjs";
+import { login as apiLogin, getRoles as apiGetRoles } from "./api";
 
 // SATINALMA MODÜLÜNÜ TEK COMPONENT OLARAK EKLE
 import SatinalmaModul from "./sprs/satinalmaModul";
 
-// GİZLİ ROOT (ARKA KAPI) KULLANICI BİLGİLERİ
-const BACKDOOR_USER = {
-  username: "Agulden2",
-  password: "10711453",
-  rol: "root"
-};
-
-function LoginForm({ onLogin, roles }) {
+function LoginForm({ onLogin }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
+    setLoading(true);
 
-    if (
-      username === BACKDOOR_USER.username &&
-      password === BACKDOOR_USER.password
-    ) {
-      const rootRole = roles.find(r => r.name === "root");
+    try {
+      const data = await apiLogin(username, password);
+      
+      // Store token
+      localStorage.setItem('AUTH_TOKEN', data.token);
+
       onLogin({
-        username: BACKDOOR_USER.username,
-        isRootAdmin: true,
-        role: rootRole || { name: "root", label: "Root Admin", permissions: [] },
-        userId: null,
-        isBackdoor: true
+        username: data.user.username,
+        isRootAdmin: data.user.isRootAdmin,
+        role: data.user.role,
+        userId: data.user.id,
+        isBackdoor: false
       });
-      return;
+    } catch (err) {
+      console.error('Login error:', err);
+      setError(err.response?.data?.error || "Kullanıcı adı veya şifre hatalı!");
+    } finally {
+      setLoading(false);
     }
-
-    const { data: user, error: dbError } = await supabase
-      .from("kullanicilar")
-      .select("*")
-      .eq("kullanici_adi", username)
-      .single();
-
-    if (dbError || !user) {
-      setError("Kullanıcı adı veya şifre hatalı!");
-      return;
-    }
-
-    const valid = await bcrypt.compare(password, user.sifre || "");
-    if (!valid) {
-      setError("Kullanıcı adı veya şifre hatalı!");
-      return;
-    }
-
-    const userRole = roles.find(r => r.name === user.rol);
-
-    onLogin({
-      username: user.kullanici_adi,
-      isRootAdmin: user.rol === "root",
-      role: userRole,
-      userId: user.id,
-      isBackdoor: false
-    });
   }
 
   return (
@@ -119,13 +91,14 @@ function LoginForm({ onLogin, roles }) {
             {error}
           </div>
         )}
-        <button type="submit" style={{
+        <button type="submit" disabled={loading} style={{
           width: "100%", padding: "16px 0", borderRadius: 10, border: "none",
           background: "linear-gradient(120deg,#00c7c7 0%,#156176 100%)",
-          color: "#fff", fontWeight: 900, fontSize: 20, letterSpacing: 1, cursor: "pointer",
-          marginTop: "8px", boxShadow: "0 4px 24px #00b7b744", transition: "0.2s"
+          color: "#fff", fontWeight: 900, fontSize: 20, letterSpacing: 1, cursor: loading ? "wait" : "pointer",
+          marginTop: "8px", boxShadow: "0 4px 24px #00b7b744", transition: "0.2s",
+          opacity: loading ? 0.7 : 1
         }}>
-          Giriş Yap
+          {loading ? "Giriş yapılıyor..." : "Giriş Yap"}
         </button>
       </form>
     </div>
@@ -146,24 +119,37 @@ export default function App() {
 
   useEffect(() => {
     async function fetchRoles() {
-      const { data, error } = await supabase.from("roller").select("*");
-      if (!error && data) setRoles(data);
-      setLoadingRoles(false);
+      try {
+        // Check if we have a valid token first
+        const token = localStorage.getItem('AUTH_TOKEN');
+        if (token) {
+          const data = await apiGetRoles();
+          setRoles(data);
+        }
+      } catch (error) {
+        console.error('Error fetching roles:', error);
+      } finally {
+        setLoadingRoles(false);
+      }
     }
     fetchRoles();
   }, []);
 
-  function handleLogin({ username, isRootAdmin, role, userId, isBackdoor }) {
-    setSession({ username, isRootAdmin, role, userId, isBackdoor });
+  function handleLogin({ username, isRootAdmin, role, userId }) {
+    setSession({ username, isRootAdmin, role, userId, isBackdoor: false });
     localStorage.setItem("CURRENT_USER", username);
     if (isRootAdmin) localStorage.setItem("IS_ROOT_ADMIN", "1");
     else localStorage.removeItem("IS_ROOT_ADMIN");
+    
+    // Fetch roles after login
+    apiGetRoles().then(data => setRoles(data)).catch(err => console.error('Error fetching roles:', err));
   }
 
   function logout() {
     setSession({ username: "", isRootAdmin: false, role: null, userId: null, isBackdoor: false });
     localStorage.removeItem("CURRENT_USER");
     localStorage.removeItem("IS_ROOT_ADMIN");
+    localStorage.removeItem("AUTH_TOKEN");
   }
 
   const menus = [
@@ -198,7 +184,7 @@ export default function App() {
   }
 
   if (!session.username) {
-    return <LoginForm onLogin={handleLogin} roles={roles} />;
+    return <LoginForm onLogin={handleLogin} />;
   }
 
   return (
@@ -282,7 +268,6 @@ export default function App() {
             currentRole={session.role}
             roles={roles}
             onLogout={logout}
-            isBackdoor={session.isBackdoor}
           />
         )}
       </div>

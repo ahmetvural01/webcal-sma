@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { supabase } from "./supabaseClient";
-import bcrypt from "bcryptjs";
+import { getRoles as apiGetRoles, getKullanicilar as apiGetKullanicilar, createKullanici as apiCreateKullanici, updateKullanici as apiUpdateKullanici, deleteKullanici as apiDeleteKullanici } from "./api";
 import YETKI_KATEGORILERI from "./YetkilerConfig";
 
 // Tema renkleri ve stilleri
@@ -228,7 +227,7 @@ function getUserEffectivePermissions(user, roles, isRootAdmin) {
   ])).filter(p => !(user.removed_permissions || []).includes(p));
 }
 
-export default function AyarlarStokRBAC({ currentUser, isRootAdmin = false, isBackdoor = false }) {
+export default function AyarlarStokRBAC({ currentUser, isRootAdmin = false }) {
   const [roles, setRoles] = useState([]);
   const [users, setUsers] = useState([]);
   const [pending, setPending] = useState(false);
@@ -240,24 +239,28 @@ export default function AyarlarStokRBAC({ currentUser, isRootAdmin = false, isBa
 
   useEffect(() => {
     async function fetchData() {
-      const { data: dbRoles } = await supabase.from("roller").select("*");
-      setRoles(dbRoles || []);
-      const { data: dbUsers } = await supabase.from("kullanicilar").select("*");
-      setUsers(dbUsers || []);
+      try {
+        const dbRoles = await apiGetRoles();
+        setRoles(dbRoles || []);
+        const dbUsers = await apiGetKullanicilar();
+        setUsers(dbUsers || []);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+      }
     }
     fetchData();
     setUserPermDrafts({});
   }, [pending]);
 
   const activeUser = useMemo(
-    () => (isRootAdmin || isBackdoor)
-      ? { kullanici_adi: "admin", rol: "admin", extra_permissions: [], removed_permissions: [], sifre: "" }
+    () => isRootAdmin
+      ? { kullanici_adi: "admin", rol: "admin", extra_permissions: [], removed_permissions: [] }
       : users.find(u => u.kullanici_adi === currentUser) || null,
-    [isRootAdmin, isBackdoor, users, currentUser]
+    [isRootAdmin, users, currentUser]
   );
 
   let filteredUsers = [];
-  if (isRootAdmin || isBackdoor) {
+  if (isRootAdmin) {
     filteredUsers = users;
   } else if (activeUser) {
     filteredUsers = users.filter(u => u.kullanici_adi !== "admin");
@@ -270,11 +273,11 @@ export default function AyarlarStokRBAC({ currentUser, isRootAdmin = false, isBa
     }
   }
 
-  const canSeeRolesPanel = isRootAdmin || isBackdoor;
-  const isAdminOrRoot = isRootAdmin || isBackdoor || (activeUser && activeUser.rol === "admin");
+  const canSeeRolesPanel = isRootAdmin;
+  const isAdminOrRoot = isRootAdmin || (activeUser && activeUser.rol === "admin");
 
   function getAllowedRolesForUserAddEdit(targetUser) {
-    if (isRootAdmin || isBackdoor) return roles.map(r => r.name);
+    if (isRootAdmin) return roles.map(r => r.name);
     if (activeUser && activeUser.rol === "admin") {
       if (targetUser?.rol === "admin" && targetUser?.kullanici_adi !== activeUser.kullanici_adi) {
         return ["admin"];
@@ -285,7 +288,7 @@ export default function AyarlarStokRBAC({ currentUser, isRootAdmin = false, isBa
   }
 
   function canEditUser(u) {
-    if (isRootAdmin || isBackdoor) return true;
+    if (isRootAdmin) return true;
     if (activeUser && activeUser.rol === "admin") {
       if (u.rol === "admin" && u.kullanici_adi !== activeUser.kullanici_adi) return false;
       if (u.rol === "admin" && u.kullanici_adi === activeUser.kullanici_adi) return true;
@@ -295,7 +298,7 @@ export default function AyarlarStokRBAC({ currentUser, isRootAdmin = false, isBa
   }
 
   function canDeleteUser(u) {
-    if (isRootAdmin || isBackdoor) return u.kullanici_adi !== "admin";
+    if (isRootAdmin) return u.kullanici_adi !== "admin";
     if (activeUser && activeUser.rol === "admin") {
       if (u.rol === "admin") return false;
       return true;
@@ -353,50 +356,41 @@ export default function AyarlarStokRBAC({ currentUser, isRootAdmin = false, isBa
       setUserModal(m => ({ ...m, formError: "Kullanıcı adı, şifre ve rol zorunludur." }));
       return;
     }
-    let hashedPassword = "";
-    if (userModal.addMode || sifre.trim()) {
-      hashedPassword = await bcrypt.hash(sifre, 10);
-    }
-    if (userModal.addMode) {
-      if (users.some(u => u.kullanici_adi === kullanici_adi)) {
-        setUserModal(m => ({ ...m, formError: "Bu kullanıcı adı zaten var!" }));
-        return;
-      }
-      const { error } = await supabase.from("kullanicilar").insert([
-        {
+    
+    try {
+      if (userModal.addMode) {
+        if (users.some(u => u.kullanici_adi === kullanici_adi)) {
+          setUserModal(m => ({ ...m, formError: "Bu kullanıcı adı zaten var!" }));
+          return;
+        }
+        await apiCreateKullanici({
           kullanici_adi,
-          sifre: hashedPassword,
+          sifre,
           rol,
           extra_permissions: draftPerm.extra_permissions,
           removed_permissions: draftPerm.removed_permissions
-        }
-      ]);
-      if (error) {
-        setUserModal(m => ({ ...m, formError: error.message }));
-        return;
+        });
+      } else {
+        const updateObj = {
+          kullanici_adi,
+          rol,
+          extra_permissions: draftPerm.extra_permissions,
+          removed_permissions: draftPerm.removed_permissions
+        };
+        if (sifre.trim()) updateObj.sifre = sifre;
+        await apiUpdateKullanici(filteredUsers[userModal.idx].id, updateObj);
       }
-    } else {
-      const updateObj = {
-        rol,
-        extra_permissions: draftPerm.extra_permissions,
-        removed_permissions: draftPerm.removed_permissions
-      };
-      if (sifre.trim()) updateObj.sifre = hashedPassword;
-      const { error } = await supabase.from("kullanicilar")
-        .update(updateObj)
-        .eq("id", filteredUsers[userModal.idx].id);
-      if (error) {
-        setUserModal(m => ({ ...m, formError: error.message }));
-        return;
-      }
+      setUserModal({ open: false, idx: null, user: null, addMode: false, formError: "" });
+      setUserPermDrafts(drafts => {
+        const copy = { ...drafts };
+        delete copy[userModal.user.id];
+        return copy;
+      });
+      setPending(p => !p);
+    } catch (error) {
+      console.error('Error saving user:', error);
+      setUserModal(m => ({ ...m, formError: error.response?.data?.error || error.message }));
     }
-    setUserModal({ open: false, idx: null, user: null, addMode: false, formError: "" });
-    setUserPermDrafts(drafts => {
-      const copy = { ...drafts };
-      delete copy[userModal.user.id];
-      return copy;
-    });
-    setPending(p => !p);
   }
 
   function askDeleteUser(idx) {
@@ -407,9 +401,14 @@ export default function AyarlarStokRBAC({ currentUser, isRootAdmin = false, isBa
     const id = confirmModal.id;
     const user = users.find(u => u.id === id);
     if (user.kullanici_adi === "admin") return;
-    await supabase.from("kullanicilar").delete().eq("id", id);
-    setConfirmModal({ open: false, id: null });
-    setPending(p => !p);
+    try {
+      await apiDeleteKullanici(id);
+      setConfirmModal({ open: false, id: null });
+      setPending(p => !p);
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      alert('Kullanıcı silinirken hata oluştu: ' + (error.response?.data?.error || error.message));
+    }
   }
 
   // Rol düzenleme
@@ -655,10 +654,17 @@ export default function AyarlarStokRBAC({ currentUser, isRootAdmin = false, isBa
                               (!(isRootAdmin || isBackdoor) && (activeUser && activeUser.rol === "admin" && u.rol === "admin" && u.kullanici_adi !== activeUser.kullanici_adi))
                             }
                             onChange={async e => {
-                              await supabase.from("kullanicilar")
-                                .update({ rol: e.target.value, extra_permissions: [], removed_permissions: [] })
-                                .eq("id", u.id);
-                              setPending(p => !p);
+                              try {
+                                await apiUpdateKullanici(u.id, { 
+                                  kullanici_adi: u.kullanici_adi,
+                                  rol: e.target.value, 
+                                  extra_permissions: [], 
+                                  removed_permissions: [] 
+                                });
+                                setPending(p => !p);
+                              } catch (error) {
+                                console.error('Error updating user role:', error);
+                              }
                             }}
                             style={{
                               borderRadius: 8,
@@ -672,10 +678,10 @@ export default function AyarlarStokRBAC({ currentUser, isRootAdmin = false, isBa
                           >
                             {roles
                               .filter(r =>
-                                (isRootAdmin || isBackdoor) || (activeUser && activeUser.rol === "admin"
+                                isRootAdmin || (activeUser && activeUser.rol === "admin"
                                   ? r.name !== "admin"
                                   : true)
-                                || ((isRootAdmin || isBackdoor) && r.name === "admin")
+                                || (isRootAdmin && r.name === "admin")
                               )
                               .map(r => (
                                 <option key={r.name} value={r.name}>{r.label}</option>

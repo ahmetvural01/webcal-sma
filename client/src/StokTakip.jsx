@@ -5,7 +5,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Bar, Line } from "react-chartjs-2";
 import { Chart, registerables } from "chart.js";
-import { supabase } from "./supabaseClient";
+import { getStokKayitlari as apiGetStokKayitlari, getStokLimits as apiGetStokLimits, createStokEntry as apiCreateStokEntry, setStokLimit as apiSetStokLimit, deleteStokEntry as apiDeleteStokEntry, getKullanicilar as apiGetKullanicilar, getRoles as apiGetRoles } from "./api";
 
 Chart.register(...registerables);
 
@@ -23,23 +23,13 @@ const getUserEffectivePermissions = async (username, isRootAdmin) => {
   
   try {
     // Kullanıcı bilgilerini al
-    const { data: userData, error: userError } = await supabase
-      .from('kullanicilar')
-      .select('rol, extra_permissions, removed_permissions')
-      .eq('kullanici_adi', username)
-      .single();
-
-    if (userError) throw userError;
+    const users = await apiGetKullanicilar();
+    const userData = users.find(u => u.kullanici_adi === username);
     if (!userData) return [];
 
     // Rol bilgilerini al
-    const { data: roleData, error: roleError } = await supabase
-      .from('roller')
-      .select('permissions')
-      .eq('name', userData.rol)
-      .single();
-
-    if (roleError) throw roleError;
+    const roles = await apiGetRoles();
+    const roleData = roles.find(r => r.name === userData.rol);
 
     const permsFromRole = roleData ? roleData.permissions : [];
     const extraPerms = userData.extra_permissions || [];
@@ -150,20 +140,11 @@ function StokTakipBirebir({ currentUser, isRootAdmin = false }) {
         setPermissions(perms);
         
         // Stok hareketlerini yükle
-        const { data: stokData, error: stokError } = await supabase
-          .from('stok_hareketleri')
-          .select('*')
-          .order('tarih', { ascending: true });
-        
-        if (stokError) throw stokError;
+        const stokData = await apiGetStokKayitlari();
         setKayitlar(stokData || []);
         
         // Alt limitleri yükle
-        const { data: limitData, error: limitError } = await supabase
-          .from('stok_alt_limitler')
-          .select('*');
-        
-        if (limitError) throw limitError;
+        const limitData = await apiGetStokLimits();
         
         const limitObj = {};
         (limitData || []).forEach(limit => {
