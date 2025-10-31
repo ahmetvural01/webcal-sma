@@ -17,7 +17,7 @@ import SaveIcon from "@mui/icons-material/Save";
 import PrintIcon from '@mui/icons-material/Print';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import * as XLSX from 'xlsx';
-import { supabase } from './supabaseClient';
+import { getOlculler as apiGetOlculler, createOlcu as apiCreateOlcu, updateOlcu as apiUpdateOlcu, deleteOlcu as apiDeleteOlcu } from './api';
 
 const DRAWING_SRC = "/olcu_cizim.png";
 const KOLONLAR = [
@@ -63,9 +63,15 @@ export default function OlcullerForm() {
 
   async function fetchOlculler() {
     setLoading(true);
-    const { data, error } = await supabase.from("olculler").select("*").order("id", { ascending: true });
-    if (!error) setOlculler(data || []);
-    setLoading(false);
+    try {
+      const data = await apiGetOlculler();
+      setOlculler(data || []);
+    } catch (error) {
+      console.error('Error fetching olculler:', error);
+      setSnackbar({ open: true, message: "Veriler yüklenemedi", severity: "error" });
+    } finally {
+      setLoading(false);
+    }
   }
 
   function filterRows(row) {
@@ -142,56 +148,40 @@ export default function OlcullerForm() {
       }
     });
 
-    if (dialog.mode === "edit" && dialog.row.id) {
-      const { error } = await supabase
-        .from("olculler")
-        .update(yeniKayit)
-        .eq("id", dialog.row.id);
-      if (!error) {
+    try {
+      if (dialog.mode === "edit" && dialog.row.id) {
+        await apiUpdateOlcu(dialog.row.id, yeniKayit);
         showSnackbar("Ölçü başarıyla güncellendi!", "success");
         fetchOlculler();
         handleDialogClose();
       } else {
-        console.log("Supabase güncelleme hatası:", error);
-        showSnackbar("Güncelleme hatası!", "error");
-      }
-    } else {
-      const kayit = { 
-        ...yeniKayit,
-        created_at: new Date().toISOString()
-      };
-      const { error } = await supabase
-        .from("olculler")
-        .insert([kayit]);
-      if (!error) {
+        await apiCreateOlcu(yeniKayit);
         showSnackbar("Yeni ölçü başarıyla eklendi!", "success");
         fetchOlculler();
         handleDialogClose();
-      } else {
-        console.log("Supabase ekleme hatası:", error);
-        showSnackbar("Ekleme hatası!", "error");
       }
+    } catch (error) {
+      console.error("API hatası:", error);
+      showSnackbar(error.response?.data?.error || "İşlem hatası!", "error");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function handleDelete(index) {
     const row = olculler[index];
     if (!row || !row.id) return;
     setLoading(true);
-    const { error } = await supabase
-      .from("olculler")
-      .delete()
-      .eq("id", row.id);
-    if (!error) {
+    try {
+      await apiDeleteOlcu(row.id);
       showSnackbar("Ölçü başarıyla silindi!", "info");
       fetchOlculler();
       handleDialogClose();
       if (selectedRow === index) setSelectedRow(null);
-    } else {
-      console.log("Supabase silme hatası:", error);
-      showSnackbar("Silme hatası!", "error");
-    }
+    } catch (error) {
+      console.error("API silme hatası:", error);
+      showSnackbar(error.response?.data?.error || "Silme hatası!", "error");
+    } finally {
     setLoading(false);
   }
 
