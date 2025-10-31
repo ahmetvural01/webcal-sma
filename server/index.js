@@ -7,6 +7,7 @@ const rolesRoutes = require('./routes/roles');
 const kullanicilarRoutes = require('./routes/kullanicilar');
 const olcullerRoutes = require('./routes/olculler');
 const siparislerRoutes = require('./routes/siparisler');
+const stokRoutes = require('./routes/stok');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -36,6 +37,7 @@ app.use('/api/roles', rolesRoutes);
 app.use('/api/kullanicilar', kullanicilarRoutes);
 app.use('/api/olculler', olcullerRoutes);
 app.use('/api/siparisler', siparislerRoutes);
+app.use('/api/stok', stokRoutes);
 
 // 404 handler
 app.use((req, res) => {

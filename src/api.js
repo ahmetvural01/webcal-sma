@@ -143,6 +143,62 @@ export const olcullerAPI = {
   }
 };
 
+// Stok API
+export const stokAPI = {
+  // Stok takip
+  getAllTakip: async () => {
+    const response = await api.get('/stok/takip');
+    return response.data;
+  },
+  
+  getTakipByProduct: async (urunKodu) => {
+    const response = await api.get(`/stok/takip/${urunKodu}`);
+    return response.data;
+  },
+  
+  createTakip: async (data) => {
+    const response = await api.post('/stok/takip', data);
+    return response.data;
+  },
+  
+  updateTakip: async (id, data) => {
+    const response = await api.put(`/stok/takip/${id}`, data);
+    return response.data;
+  },
+  
+  deleteTakip: async (id) => {
+    const response = await api.delete(`/stok/takip/${id}`);
+    return response.data;
+  },
+  
+  // Limits
+  getAllLimits: async () => {
+    const response = await api.get('/stok/limits');
+    return response.data;
+  },
+  
+  getLimit: async (urunKodu) => {
+    const response = await api.get(`/stok/limits/${urunKodu}`);
+    return response.data;
+  },
+  
+  setLimit: async (urunKodu, altLimit) => {
+    const response = await api.put(`/stok/limits/${urunKodu}`, { alt_limit: altLimit });
+    return response.data;
+  },
+  
+  deleteLimit: async (urunKodu) => {
+    const response = await api.delete(`/stok/limits/${urunKodu}`);
+    return response.data;
+  },
+  
+  // Products
+  getProductCodes: async () => {
+    const response = await api.get('/stok/products/codes');
+    return response.data;
+  }
+};
+
 // Siparisler API
 export const siparislerAPI = {
   getAll: async (filters = {}) => {
