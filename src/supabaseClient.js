@@ -1,6 +1,10 @@
-import { createClient } from "@supabase/supabase-js";
+// DEPRECATED: This file is no longer used.
+// All database operations now go through the secure backend API.
+// See src/api.js for the new API client.
 
-const supabaseUrl = "https://hxptnnqmmroizubvhozo.supabase.co";
-const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4cHRubnFtbXJvaXp1YnZob3pvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA4NDU0MjEsImV4cCI6MjA2NjQyMTQyMX0.GFVQAMHjZR3bNhiNtUm9aNmTj6awHwOFBT7f7MMbRyw";
+// Keeping this file for backward compatibility but it's disabled.
+// Hard-coded credentials have been removed for security.
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = null;
+
+console.warn('supabaseClient.js is deprecated. Please use the API from src/api.js instead.');

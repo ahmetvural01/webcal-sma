@@ -12,6 +12,7 @@
     "@mui/icons-material": "^7.1.2",
     "@mui/material": "^7.1.2",
     "@supabase/supabase-js": "^2.50.2",
+    "axios": "^1.6.0",
     "bcryptjs": "^3.0.2",
     "chart.js": "^4.5.0",
     "date-fns": "^4.1.0",
