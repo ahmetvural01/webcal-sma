@@ -5,7 +5,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Bar, Line } from "react-chartjs-2";
 import { Chart, registerables } from "chart.js";
-import { supabase } from "./supabaseClient";
+import * as api from "./api";
 
 Chart.register(...registerables);
 
@@ -22,24 +22,15 @@ const getUserEffectivePermissions = async (username, isRootAdmin) => {
   if (!username) return [];
   
   try {
-    // Kullanıcı bilgilerini al
-    const { data: userData, error: userError } = await supabase
-      .from('kullanicilar')
-      .select('rol, extra_permissions, removed_permissions')
-      .eq('kullanici_adi', username)
-      .single();
+    // Get all users and find the current user
+    const users = await api.getKullanicilar();
+    const userData = users.find(u => u.kullanici_adi === username);
 
-    if (userError) throw userError;
     if (!userData) return [];
 
-    // Rol bilgilerini al
-    const { data: roleData, error: roleError } = await supabase
-      .from('roller')
-      .select('permissions')
-      .eq('name', userData.rol)
-      .single();
-
-    if (roleError) throw roleError;
+    // Get all roles and find the user's role
+    const roles = await api.getRoles();
+    const roleData = roles.find(r => r.name === userData.rol);
 
     const permsFromRole = roleData ? roleData.permissions : [];
     const extraPerms = userData.extra_permissions || [];
@@ -150,20 +141,11 @@ function StokTakipBirebir({ currentUser, isRootAdmin = false }) {
         setPermissions(perms);
         
         // Stok hareketlerini yükle
-        const { data: stokData, error: stokError } = await supabase
-          .from('stok_hareketleri')
-          .select('*')
-          .order('tarih', { ascending: true });
-        
-        if (stokError) throw stokError;
+        const stokData = await api.getStokHareketleri();
         setKayitlar(stokData || []);
         
         // Alt limitleri yükle
-        const { data: limitData, error: limitError } = await supabase
-          .from('stok_alt_limitler')
-          .select('*');
-        
-        if (limitError) throw limitError;
+        const limitData = await api.getStokAltLimitler();
         
         const limitObj = {};
         (limitData || []).forEach(limit => {
@@ -345,32 +327,17 @@ function StokTakipBirebir({ currentUser, isRootAdmin = false }) {
     
     try {
       // Kayıt işlemi
-      const { data, error } = await supabase
-        .from('stok_hareketleri')
-        .insert([{
-          urun_kodu: form.urunKodu,
-          urun_aciklama: form.urunAciklama,
-          islem_turu: form.islemTuru,
-          giris_miktari: Number(form.girisMiktari) || 0,
-          cikis_miktari: Number(form.cikisMiktari) || 0,
-          ek_aciklama: form.ekAciklama,
-          tarih: new Date().toISOString(),
-          kullanici_adi: currentUser
-        }]);
-      
-      if (error) throw error;
-      
-      // State güncelleme
-      setKayitlar([...kayitlar, {
+      const newHareket = await api.createStokHareket({
         urun_kodu: form.urunKodu,
         urun_aciklama: form.urunAciklama,
         islem_turu: form.islemTuru,
         giris_miktari: Number(form.girisMiktari) || 0,
         cikis_miktari: Number(form.cikisMiktari) || 0,
-        ek_aciklama: form.ekAciklama,
-        tarih: new Date().toISOString(),
-        kullanici_adi: currentUser
-      }]);
+        ek_aciklama: form.ekAciklama
+      });
+      
+      // State güncelleme
+      setKayitlar([...kayitlar, newHareket]);
       
       setBildirim("Başarıyla kaydedildi!");
       setTimeout(() => setBildirim(""), 2000);
@@ -535,18 +502,13 @@ function StokTakipBirebir({ currentUser, isRootAdmin = false }) {
     if (!duzenleModal.seciliHareket) return;
     
     try {
-      const { error } = await supabase
-        .from('stok_hareketleri')
-        .update({
-          tarih: duzenleModal.hareketDetay.tarih,
-          islem_turu: duzenleModal.hareketDetay.islemTuru,
-          giris_miktari: Number(duzenleModal.hareketDetay.girisMiktari) || 0,
-          cikis_miktari: Number(duzenleModal.hareketDetay.cikisMiktari) || 0,
-          ek_aciklama: duzenleModal.hareketDetay.ekAciklama
-        })
-        .eq('id', duzenleModal.seciliHareket.id);
-      
-      if (error) throw error;
+      await api.updateStokHareket(duzenleModal.seciliHareket.id, {
+        tarih: duzenleModal.hareketDetay.tarih,
+        islem_turu: duzenleModal.hareketDetay.islemTuru,
+        giris_miktari: Number(duzenleModal.hareketDetay.girisMiktari) || 0,
+        cikis_miktari: Number(duzenleModal.hareketDetay.cikisMiktari) || 0,
+        ek_aciklama: duzenleModal.hareketDetay.ekAciklama
+      });
       
       // State güncelleme
       const guncellenmisKayitlar = kayitlar.map(kayit => {
@@ -602,12 +564,7 @@ function StokTakipBirebir({ currentUser, isRootAdmin = false }) {
     if (!duzenleModal.seciliHareket) return;
     
     try {
-      const { error } = await supabase
-        .from('stok_hareketleri')
-        .delete()
-        .eq('id', duzenleModal.seciliHareket.id);
-      
-      if (error) throw error;
+      await api.deleteStokHareket(duzenleModal.seciliHareket.id);
       
       // State güncelleme
       const filtrelenmisKayitlar = kayitlar.filter(
@@ -648,15 +605,7 @@ function StokTakipBirebir({ currentUser, isRootAdmin = false }) {
     
     try {
       // Tüm kayıtlarda güncelleme yap
-      const { error: updateError } = await supabase
-        .from('stok_hareketleri')
-        .update({
-          urun_kodu: yeniKod,
-          urun_aciklama: yeniAciklama
-        })
-        .eq('urun_kodu', urun.urunKodu);
-      
-      if (updateError) throw updateError;
+      await api.updateStokProduct(urun.urunKodu, yeniKod, yeniAciklama);
       
       // State güncelleme
       const guncellenmisKayitlar = kayitlar.map(kayit => {
@@ -674,33 +623,18 @@ function StokTakipBirebir({ currentUser, isRootAdmin = false }) {
       
       // Limitleri güncelle
       if (yeniLimit !== "") {
-        // Upsert işlemi: Varsa güncelle, yoksa ekle
-        const { error: limitError } = await supabase
-          .from('stok_alt_limitler')
-          .upsert({
-            urun_kodu: yeniKod,
-            alt_limit: Number(yeniLimit)
-          }, { onConflict: 'urun_kodu' });
-        
-        if (limitError) throw limitError;
+        await api.upsertStokAltLimit(yeniKod, Number(yeniLimit));
       } else {
-        // Limit silme
-        const { error: deleteError } = await supabase
-          .from('stok_alt_limitler')
-          .delete()
-          .eq('urun_kodu', yeniKod);
-        
-        if (deleteError) throw deleteError;
+        await api.deleteStokAltLimit(yeniKod);
       }
       
       // Eski limiti sil
       if (urun.urunKodu !== yeniKod) {
-        const { error: deleteOldError } = await supabase
-          .from('stok_alt_limitler')
-          .delete()
-          .eq('urun_kodu', urun.urunKodu);
-        
-        if (deleteOldError) console.warn("Eski limit silinemedi:", deleteOldError);
+        try {
+          await api.deleteStokAltLimit(urun.urunKodu);
+        } catch (error) {
+          console.warn("Eski limit silinemedi:", error);
+        }
       }
       
       // State güncelleme
@@ -732,12 +666,7 @@ function StokTakipBirebir({ currentUser, isRootAdmin = false }) {
     
     try {
       // Tüm hareketleri sil
-      const { error: deleteHareketError } = await supabase
-        .from('stok_hareketleri')
-        .delete()
-        .eq('urun_kodu', urun.urunKodu);
-      
-      if (deleteHareketError) throw deleteHareketError;
+      await api.deleteStokHareketlerByProduct(urun.urunKodu);
       
       // State güncelleme
       const filtrelenmisKayitlar = kayitlar.filter(
@@ -747,12 +676,7 @@ function StokTakipBirebir({ currentUser, isRootAdmin = false }) {
       setKayitlar(filtrelenmisKayitlar);
       
       // Limit silme
-      const { error: deleteLimitError } = await supabase
-        .from('stok_alt_limitler')
-        .delete()
-        .eq('urun_kodu', urun.urunKodu);
-      
-      if (deleteLimitError) throw deleteLimitError;
+      await api.deleteStokAltLimit(urun.urunKodu);
       
       // State güncelleme
       const yeniLimits = { ...limits };
@@ -1097,15 +1021,7 @@ function StokTakipBirebir({ currentUser, isRootAdmin = false }) {
 
   async function handleLimitChangeSave() {
     try {
-      // Upsert işlemi: Varsa güncelle, yoksa ekle
-      const { error } = await supabase
-        .from('stok_alt_limitler')
-        .upsert({
-          urun_kodu: limitModal.kod,
-          alt_limit: Number(limitModal.value) || 0
-        }, { onConflict: 'urun_kodu' });
-      
-      if (error) throw error;
+      await api.upsertStokAltLimit(limitModal.kod, Number(limitModal.value) || 0);
       
       // State güncelleme
       setLimits(l => {
@@ -1123,15 +1039,7 @@ function StokTakipBirebir({ currentUser, isRootAdmin = false }) {
 
   async function handleDetayLimitChangeSave() {
     try {
-      // Upsert işlemi: Varsa güncelle, yoksa ekle
-      const { error } = await supabase
-        .from('stok_alt_limitler')
-        .upsert({
-          urun_kodu: detayLimitModal.kod,
-          alt_limit: Number(detayLimitModal.value) || 0
-        }, { onConflict: 'urun_kodu' });
-      
-      if (error) throw error;
+      await api.upsertStokAltLimit(detayLimitModal.kod, Number(detayLimitModal.value) || 0);
       
       // State güncelleme
       setLimits(l => {

