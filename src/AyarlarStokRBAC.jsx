@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { supabase } from "./supabaseClient";
-import bcrypt from "bcryptjs";
+import * as api from "./api";
 import YETKI_KATEGORILERI from "./YetkilerConfig";
 
 // Tema renkleri ve stilleri
@@ -240,10 +239,14 @@ export default function AyarlarStokRBAC({ currentUser, isRootAdmin = false, isBa
 
   useEffect(() => {
     async function fetchData() {
-      const { data: dbRoles } = await supabase.from("roller").select("*");
-      setRoles(dbRoles || []);
-      const { data: dbUsers } = await supabase.from("kullanicilar").select("*");
-      setUsers(dbUsers || []);
+      try {
+        const dbRoles = await api.getRoles();
+        setRoles(dbRoles || []);
+        const dbUsers = await api.getKullanicilar();
+        setUsers(dbUsers || []);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+      }
     }
     fetchData();
     setUserPermDrafts({});
@@ -353,50 +356,47 @@ export default function AyarlarStokRBAC({ currentUser, isRootAdmin = false, isBa
       setUserModal(m => ({ ...m, formError: "Kullanıcı adı, şifre ve rol zorunludur." }));
       return;
     }
-    let hashedPassword = "";
-    if (userModal.addMode || sifre.trim()) {
-      hashedPassword = await bcrypt.hash(sifre, 10);
-    }
-    if (userModal.addMode) {
-      if (users.some(u => u.kullanici_adi === kullanici_adi)) {
-        setUserModal(m => ({ ...m, formError: "Bu kullanıcı adı zaten var!" }));
-        return;
-      }
-      const { error } = await supabase.from("kullanicilar").insert([
-        {
+    
+    try {
+      if (userModal.addMode) {
+        if (users.some(u => u.kullanici_adi === kullanici_adi)) {
+          setUserModal(m => ({ ...m, formError: "Bu kullanıcı adı zaten var!" }));
+          return;
+        }
+        
+        await api.createKullanici({
           kullanici_adi,
-          sifre: hashedPassword,
+          sifre,  // Send plain password, server will hash it
           rol,
           extra_permissions: draftPerm.extra_permissions,
           removed_permissions: draftPerm.removed_permissions
+        });
+      } else {
+        const updateObj = {
+          rol,
+          extra_permissions: draftPerm.extra_permissions,
+          removed_permissions: draftPerm.removed_permissions
+        };
+        
+        // Only include password if it's being changed
+        if (sifre.trim()) {
+          updateObj.sifre = sifre;  // Send plain password, server will hash it
         }
-      ]);
-      if (error) {
-        setUserModal(m => ({ ...m, formError: error.message }));
-        return;
+        
+        await api.updateKullanici(filteredUsers[userModal.idx].id, updateObj);
       }
-    } else {
-      const updateObj = {
-        rol,
-        extra_permissions: draftPerm.extra_permissions,
-        removed_permissions: draftPerm.removed_permissions
-      };
-      if (sifre.trim()) updateObj.sifre = hashedPassword;
-      const { error } = await supabase.from("kullanicilar")
-        .update(updateObj)
-        .eq("id", filteredUsers[userModal.idx].id);
-      if (error) {
-        setUserModal(m => ({ ...m, formError: error.message }));
-        return;
-      }
+      
+      setUserModal({ open: false, idx: null, user: null, addMode: false, formError: "" });
+      setUserPermDrafts(drafts => {
+        const copy = { ...drafts };
+        delete copy[userModal.user.id];
+        return copy;
+      });
+      setPending(p => !p);
+    } catch (error) {
+      console.error('Error saving user:', error);
+      setUserModal(m => ({ ...m, formError: error.response?.data?.error || error.message }));
     }
-    setUserModal({ open: false, idx: null, user: null, addMode: false, formError: "" });
-    setUserPermDrafts(drafts => {
-      const copy = { ...drafts };
-      delete copy[userModal.user.id];
-      return copy;
-    });
-    setPending(p => !p);
   }
 
   function askDeleteUser(idx) {
@@ -407,9 +407,14 @@ export default function AyarlarStokRBAC({ currentUser, isRootAdmin = false, isBa
     const id = confirmModal.id;
     const user = users.find(u => u.id === id);
     if (user.kullanici_adi === "admin") return;
-    await supabase.from("kullanicilar").delete().eq("id", id);
-    setConfirmModal({ open: false, id: null });
-    setPending(p => !p);
+    
+    try {
+      await api.deleteKullanici(id);
+      setConfirmModal({ open: false, id: null });
+      setPending(p => !p);
+    } catch (error) {
+      console.error('Error deleting user:', error);
+    }
   }
 
   // Rol düzenleme
@@ -440,27 +445,33 @@ export default function AyarlarStokRBAC({ currentUser, isRootAdmin = false, isBa
   async function saveRoleModal() {
     let { name, label, color, fixed } = roleModal.role;
     if (!label.trim()) return;
-    if (roleModal.addMode) {
-      if (roles.some(r => r.name === name)) return;
-      const { error } = await supabase.from("roller").insert([
-        { name, label, color, permissions: permState, fixed: !!fixed }
-      ]);
-      if (error) return;
-    } else {
-      const { error } = await supabase.from("roller")
-        .update({ name, label, color, permissions: permState, fixed: !!fixed })
-        .eq("id", roles[roleModal.idx].id);
-      if (error) return;
+    
+    try {
+      if (roleModal.addMode) {
+        if (roles.some(r => r.name === name)) return;
+        await api.createRole({ name, label, color, permissions: permState, fixed: !!fixed });
+      } else {
+        await api.updateRole(roles[roleModal.idx].id, { name, label, color, permissions: permState, fixed: !!fixed });
+      }
+      
+      setRoleModal({ open: false, idx: null, role: null, addMode: false });
+      setPermState([]);
+      setPending(p => !p);
+    } catch (error) {
+      console.error('Error saving role:', error);
     }
-    setRoleModal({ open: false, idx: null, role: null, addMode: false });
-    setPermState([]);
-    setPending(p => !p);
   }
+  
   async function deleteRole(idx) {
     if (roles[idx].fixed) return;
     const id = roles[idx].id;
-    await supabase.from("roller").delete().eq("id", id);
-    setPending(p => !p);
+    
+    try {
+      await api.deleteRole(id);
+      setPending(p => !p);
+    } catch (error) {
+      console.error('Error deleting role:', error);
+    }
   }
 
   function handleUserPermDraftChange(user, permKey) {
@@ -655,10 +666,16 @@ export default function AyarlarStokRBAC({ currentUser, isRootAdmin = false, isBa
                               (!(isRootAdmin || isBackdoor) && (activeUser && activeUser.rol === "admin" && u.rol === "admin" && u.kullanici_adi !== activeUser.kullanici_adi))
                             }
                             onChange={async e => {
-                              await supabase.from("kullanicilar")
-                                .update({ rol: e.target.value, extra_permissions: [], removed_permissions: [] })
-                                .eq("id", u.id);
-                              setPending(p => !p);
+                              try {
+                                await api.updateKullanici(u.id, { 
+                                  rol: e.target.value, 
+                                  extra_permissions: [], 
+                                  removed_permissions: [] 
+                                });
+                                setPending(p => !p);
+                              } catch (error) {
+                                console.error('Error updating user role:', error);
+                              }
                             }}
                             style={{
                               borderRadius: 8,
