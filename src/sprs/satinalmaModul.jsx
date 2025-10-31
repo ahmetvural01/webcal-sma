@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { supabase } from "../supabaseClient";
+import { siparislerAPI } from "../api";
 import { QRCodeCanvas } from "qrcode.react";
 import JsBarcode from "jsbarcode";
 
@@ -46,8 +46,12 @@ export default function SatinalmaModul({ user }) {
   // --- Tedarikçi Listesi Yükle ---
   useEffect(() => {
     async function fetchTedarikciler() {
-      const { data } = await supabase.from("tedarikciler").select("*").order("adi",{ascending: true});
-      setTedarikciler(data || []);
+      try {
+        const data = await siparislerAPI.getTedarikciler();
+        setTedarikciler(data || []);
+      } catch (error) {
+        console.error('Error fetching tedarikciler:', error);
+      }
     }
     fetchTedarikciler();
   }, []);
@@ -55,13 +59,14 @@ export default function SatinalmaModul({ user }) {
   // --- Sipariş No Otomatik Yarat ---
   useEffect(() => {
     async function yeniNo() {
-      const { data, error } = await supabase
-        .from("siparisler")
-        .select("siparis_no")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
-      setSiparisNo(generateSiparisNo(error || !data ? "0000" : data.siparis_no?.substring(5)));
+      try {
+        const allSiparisler = await siparislerAPI.getAll();
+        const lastSiparis = allSiparisler.length > 0 ? allSiparisler[0] : null;
+        setSiparisNo(generateSiparisNo(!lastSiparis ? "0000" : lastSiparis.siparis_no?.substring(5)));
+      } catch (error) {
+        console.error('Error generating siparis no:', error);
+        setSiparisNo(generateSiparisNo("0000"));
+      }
     }
     yeniNo();
   }, []);
@@ -82,12 +87,14 @@ export default function SatinalmaModul({ user }) {
 
   async function fetchSiparisler() {
     setLoading(true);
-    let query = supabase.from("siparisler").select("*").order("created_at", { ascending: false });
-    if (filtre.firma) query = query.ilike("tedarikci_adi", `%${filtre.firma}%`);
-    if (filtre.durum) query = query.eq("durum", filtre.durum);
-    const { data } = await query;
-    setSiparisler(data || []);
-    setLoading(false);
+    try {
+      const data = await siparislerAPI.getAll(filtre);
+      setSiparisler(data || []);
+    } catch (error) {
+      console.error('Error fetching siparisler:', error);
+    } finally {
+      setLoading(false);
+    }
   }
 
   // --- Excel Dosyası Okuyucu (SheetJS ile) ---
@@ -136,12 +143,16 @@ export default function SatinalmaModul({ user }) {
   // --- Tedarikçi Ekleme ---
   async function handleTedarikciEkle() {
     if (!yeniTedarikci.adi) return alert("Tedarikçi adı zorunlu!");
-    const { data, error } = await supabase.from("tedarikciler").insert([yeniTedarikci]).select();
-    if (error) return alert("Kayıt başarısız!");
-    setTedarikciler([...tedarikciler, ...data]);
-    setTedarikci(data[0].id);
-    setYeniTedarikci({ adi: "", email: "", telefon: "", adres: "", vergi_no: "" });
-    setShowTedarikciPopup(false);
+    try {
+      const data = await siparislerAPI.createTedarikci(yeniTedarikci);
+      setTedarikciler([...tedarikciler, data]);
+      setTedarikci(data.id);
+      setYeniTedarikci({ adi: "", email: "", telefon: "", adres: "", vergi_no: "" });
+      setShowTedarikciPopup(false);
+    } catch (error) {
+      console.error('Error creating tedarikci:', error);
+      alert("Kayıt başarısız!");
+    }
   }
 
   // --- SİPARİŞ KAYDET ---
@@ -152,48 +163,22 @@ export default function SatinalmaModul({ user }) {
     }
     if (!tedarikci) return alert("Tedarikçi seçmelisiniz!");
     if (urunler.length === 0) return alert("En az bir ürün ekleyin!");
-    const tedarikciObj = tedarikciler.find(t => t.id === tedarikci);
-    const { data, error } = await supabase.from("siparisler").insert([{
-      siparis_no: siparisNo,
-      tedarikci_id: tedarikci,
-      tedarikci_adi: tedarikciObj ? tedarikciObj.adi : "",
-      olusturan_id: user.id,
-      olusturan_adi: user.kullanici_adi,
-      durum: "Bekliyor",
-      toplam_tutar: urunler.reduce((sum, u) => sum + (parseFloat(u.toplam) || 0), 0),
-      aciklama,
-      qr_url: `/qr/${siparisNo}.png`,
-      barcode_url: `/barcode/${siparisNo}.png`,
-      otomatik_stoga_aktar: otomatikStogaAktar
-    }]).select().single();
-
-    if (error) return alert("Sipariş kaydedilemedi!");
-
-    for (const urun of urunler) {
-      await supabase.from("siparis_urunleri").insert([{ siparis_id: data.id, ...urun }]);
-    }
-
-    await supabase.from("siparis_log").insert([{
-      siparis_id: data.id,
-      kullanici_id: user.id,
-      kullanici_adi: user.kullanici_adi,
-      islem: "Sipariş Oluşturuldu",
-      detay: { urunler }
-    }]);
-
-    if (otomatikStogaAktar) {
-      for (const u of urunler) {
-        await supabase.from("stok_hareketleri").insert([{
-          urun_kodu: u.urun_kodu,
-          urun_aciklama: u.urun_adi,
-          islem_turu: "Sipariş Giriş",
-          giris_miktari: u.miktar,
-          cikis_miktari: 0,
-          ek_aciklama: `Sipariş ID: ${data.id}`,
-          tarih: new Date(),
-          kullanici_adi: user.kullanici_adi
-        }]);
-      }
+    
+    try {
+      const tedarikciObj = tedarikciler.find(t => t.id === tedarikci);
+      await siparislerAPI.create({
+        siparis_no: siparisNo,
+        tedarikci_adi: tedarikciObj ? tedarikciObj.adi : "",
+        durum: "beklemede",
+        aciklama,
+        urunler: urunler,
+        otomatik_stoga_aktar: otomatikStogaAktar
+      });
+      alert("Sipariş başarıyla kaydedildi!");
+    } catch (error) {
+      console.error('Error creating siparis:', error);
+      alert("Sipariş kaydedilemedi!");
+      return;
     }
 
     alert("Sipariş başarıyla kaydedildi!");
@@ -203,8 +188,14 @@ export default function SatinalmaModul({ user }) {
     setOtomatikStogaAktar(false);
     setExcelFile(null);
     fetchSiparisler();
-    const { data: last, error: err } = await supabase.from("siparisler").select("siparis_no").order("created_at", { ascending: false }).limit(1).single();
-    setSiparisNo(generateSiparisNo(err || !last ? "0000" : last.siparis_no?.substring(5)));
+    try {
+      const allSiparisler = await siparislerAPI.getAll();
+      const lastSiparis = allSiparisler.length > 0 ? allSiparisler[0] : null;
+      setSiparisNo(generateSiparisNo(!lastSiparis ? "0000" : lastSiparis.siparis_no?.substring(5)));
+    } catch (error) {
+      console.error('Error generating new siparis no:', error);
+      setSiparisNo(generateSiparisNo("0000"));
+    }
   }
 
   return (

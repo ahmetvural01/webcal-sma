@@ -17,7 +17,7 @@ import SaveIcon from "@mui/icons-material/Save";
 import PrintIcon from '@mui/icons-material/Print';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import * as XLSX from 'xlsx';
-import { supabase } from './supabaseClient';
+import { olcullerAPI } from './api';
 
 const DRAWING_SRC = "/olcu_cizim.png";
 const KOLONLAR = [
@@ -63,9 +63,14 @@ export default function OlcullerForm() {
 
   async function fetchOlculler() {
     setLoading(true);
-    const { data, error } = await supabase.from("olculler").select("*").order("id", { ascending: true });
-    if (!error) setOlculler(data || []);
-    setLoading(false);
+    try {
+      const data = await olcullerAPI.getAll();
+      setOlculler(data || []);
+    } catch (error) {
+      console.error('Error fetching olculler:', error);
+    } finally {
+      setLoading(false);
+    }
   }
 
   function filterRows(row) {
@@ -142,35 +147,21 @@ export default function OlcullerForm() {
       }
     });
 
-    if (dialog.mode === "edit" && dialog.row.id) {
-      const { error } = await supabase
-        .from("olculler")
-        .update(yeniKayit)
-        .eq("id", dialog.row.id);
-      if (!error) {
+    try {
+      if (dialog.mode === "edit" && dialog.row.id) {
+        await olcullerAPI.update(dialog.row.id, yeniKayit);
         showSnackbar("Ölçü başarıyla güncellendi!", "success");
         fetchOlculler();
         handleDialogClose();
       } else {
-        console.log("Supabase güncelleme hatası:", error);
-        showSnackbar("Güncelleme hatası!", "error");
-      }
-    } else {
-      const kayit = { 
-        ...yeniKayit,
-        created_at: new Date().toISOString()
-      };
-      const { error } = await supabase
-        .from("olculler")
-        .insert([kayit]);
-      if (!error) {
+        await olcullerAPI.create(yeniKayit);
         showSnackbar("Yeni ölçü başarıyla eklendi!", "success");
         fetchOlculler();
         handleDialogClose();
-      } else {
-        console.log("Supabase ekleme hatası:", error);
-        showSnackbar("Ekleme hatası!", "error");
       }
+    } catch (error) {
+      console.error("API hatası:", error);
+      showSnackbar("İşlem hatası!", "error");
     }
     setLoading(false);
   }
@@ -179,20 +170,18 @@ export default function OlcullerForm() {
     const row = olculler[index];
     if (!row || !row.id) return;
     setLoading(true);
-    const { error } = await supabase
-      .from("olculler")
-      .delete()
-      .eq("id", row.id);
-    if (!error) {
+    try {
+      await olcullerAPI.delete(row.id);
       showSnackbar("Ölçü başarıyla silindi!", "info");
       fetchOlculler();
       handleDialogClose();
       if (selectedRow === index) setSelectedRow(null);
-    } else {
-      console.log("Supabase silme hatası:", error);
+    } catch (error) {
+      console.error("API silme hatası:", error);
       showSnackbar("Silme hatası!", "error");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   function handleFiltreChange(e) {
