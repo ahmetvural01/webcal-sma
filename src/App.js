@@ -4,69 +4,39 @@ import StokTakip from "./StokTakip";
 import AyarlarStokRBAC from "./AyarlarStokRBAC";
 import PersonelTakip from "./PersonelTakip";
 import OlcullerForm from "./OlcullerForm";
-import { supabase } from "./supabaseClient";
-import bcrypt from "bcryptjs";
+import { authAPI, rolesAPI } from "./api";
 
 // SATINALMA MODÜLÜNÜ TEK COMPONENT OLARAK EKLE
 import SatinalmaModul from "./sprs/satinalmaModul";
-
-// GİZLİ ROOT (ARKA KAPI) KULLANICI BİLGİLERİ
-const BACKDOOR_USER = {
-  username: "Agulden2",
-  password: "10711453",
-  rol: "root"
-};
 
 function LoginForm({ onLogin, roles }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
+    setLoading(true);
 
-    if (
-      username === BACKDOOR_USER.username &&
-      password === BACKDOOR_USER.password
-    ) {
-      const rootRole = roles.find(r => r.name === "root");
+    try {
+      const response = await authAPI.login(username, password);
+      const { user } = response;
+
       onLogin({
-        username: BACKDOOR_USER.username,
-        isRootAdmin: true,
-        role: rootRole || { name: "root", label: "Root Admin", permissions: [] },
-        userId: null,
-        isBackdoor: true
+        username: user.username,
+        isRootAdmin: user.isRootAdmin,
+        role: user.role,
+        userId: user.id,
+        isBackdoor: false
       });
-      return;
-    }
-
-    const { data: user, error: dbError } = await supabase
-      .from("kullanicilar")
-      .select("*")
-      .eq("kullanici_adi", username)
-      .single();
-
-    if (dbError || !user) {
+    } catch (err) {
+      console.error("Login error:", err);
       setError("Kullanıcı adı veya şifre hatalı!");
-      return;
+    } finally {
+      setLoading(false);
     }
-
-    const valid = await bcrypt.compare(password, user.sifre || "");
-    if (!valid) {
-      setError("Kullanıcı adı veya şifre hatalı!");
-      return;
-    }
-
-    const userRole = roles.find(r => r.name === user.rol);
-
-    onLogin({
-      username: user.kullanici_adi,
-      isRootAdmin: user.rol === "root",
-      role: userRole,
-      userId: user.id,
-      isBackdoor: false
-    });
   }
 
   return (
@@ -119,13 +89,13 @@ function LoginForm({ onLogin, roles }) {
             {error}
           </div>
         )}
-        <button type="submit" style={{
+        <button type="submit" disabled={loading} style={{
           width: "100%", padding: "16px 0", borderRadius: 10, border: "none",
-          background: "linear-gradient(120deg,#00c7c7 0%,#156176 100%)",
-          color: "#fff", fontWeight: 900, fontSize: 20, letterSpacing: 1, cursor: "pointer",
+          background: loading ? "#ccc" : "linear-gradient(120deg,#00c7c7 0%,#156176 100%)",
+          color: "#fff", fontWeight: 900, fontSize: 20, letterSpacing: 1, cursor: loading ? "not-allowed" : "pointer",
           marginTop: "8px", boxShadow: "0 4px 24px #00b7b744", transition: "0.2s"
         }}>
-          Giriş Yap
+          {loading ? "Giriş yapılıyor..." : "Giriş Yap"}
         </button>
       </form>
     </div>
@@ -146,9 +116,14 @@ export default function App() {
 
   useEffect(() => {
     async function fetchRoles() {
-      const { data, error } = await supabase.from("roller").select("*");
-      if (!error && data) setRoles(data);
-      setLoadingRoles(false);
+      try {
+        const data = await rolesAPI.getAll();
+        setRoles(data);
+      } catch (error) {
+        console.error("Error fetching roles:", error);
+      } finally {
+        setLoadingRoles(false);
+      }
     }
     fetchRoles();
   }, []);
@@ -164,6 +139,7 @@ export default function App() {
     setSession({ username: "", isRootAdmin: false, role: null, userId: null, isBackdoor: false });
     localStorage.removeItem("CURRENT_USER");
     localStorage.removeItem("IS_ROOT_ADMIN");
+    localStorage.removeItem("token");
   }
 
   const menus = [
